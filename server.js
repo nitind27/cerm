@@ -37,7 +37,7 @@ const propertyRoutes = require("./routes/propertyRoutes");
 const renterRoutes = require("./routes/renterRoutes");
 
 const app = express();
-const PORT = 3001;
+const PORT = 5000;
 
 // Middleware
 app.use(cors());                               // Allow cross-origin requests
@@ -47,9 +47,9 @@ app.use("/uploads", express.static("uploads"));  // Serve files from /uploads if
 
 // Routes
 // - Property endpoints
-// app.get('/', (req, res) => {
-//   res.send('API is running');
-// });
+app.get('/', (req, res) => {
+  res.send('API is running');
+});
 app.use("/api/property", propertyRoutes);
 
 // - Renter endpoints

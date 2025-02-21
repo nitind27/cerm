@@ -285,7 +285,7 @@ router.get("/", (req, res) => {
   db.query(query, (err, results) => {
     if (err) {
       console.error("Error fetching properties:", err);
-      return res.status(500).json({ error: "Failed to fetch properties" });
+      return res.status(500).json({ error: "Failed to fetch properties",err });
     }
     return res.json(results);
   });
