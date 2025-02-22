@@ -1,7 +1,6 @@
-
-// server.js
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 // Routes
 const propertyRoutes = require("./routes/propertyRoutes");
@@ -14,7 +13,10 @@ const PORT = 5000;
 app.use(cors());                               // Allow cross-origin requests
 app.use(express.json());                       // Parse JSON request bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded data
-app.use("/uploads", express.static("uploads"));  // Serve files from /uploads if needed
+
+// Serve files from the /tmp directory instead of the read-only /uploads directory
+// Modify to use /tmp/uploads as the location for file uploads in serverless environments
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Routes
 // - Property endpoints
