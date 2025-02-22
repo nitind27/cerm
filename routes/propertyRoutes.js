@@ -9,49 +9,37 @@ const mysql = require("mysql2");
 const upload = multer({ dest: "uploads/" });
 
 // Create a MySQL connection (adjust credentials as needed)
-const db = mysql.createConnection({
+const pool = mysql.createPool({
   host: "b9qb2i6wcb7ru3fkp9ar-mysql.services.clever-cloud.com",
   user: "uftpi1lxgdbzjy4h",
   password: "mpvfUpf2ZYHGw9gR2j32",
-
   database: "b9qb2i6wcb7ru3fkp9ar",
-  port: 3306
-
-
-  // DB_PORT = 3306
+  port: 3306,
+  waitForConnections: true,
+  connectionLimit: 10, // You can adjust this number based on the concurrency requirements
+  queueLimit: 0
 });
 
-// Connect to MySQL
-db.connect((err) => {
-  if (err) {
-    console.error("MySQL connection error:", err);
-    return;
-  }
-  console.log("Connected to MySQL (Property).");
-});
+// Promisify the pool query method so we can use async/await
+const promisePool = pool.promise();
 
 /**
  * GET /api/property
  * Fetch all properties from the DB (no child data here, just top-level)
  */
-router.get("/", (req, res) => {
-  const query = "SELECT * FROM properties";
-  db.query(query, (err, results) => {
-    if (err) {
-      console.error("Error fetching properties:", err);
-      return res.status(500).json({ error: "Failed to fetch properties",err });
-    }
-    return res.json(results);
-  });
+router.get("/", async (req, res) => {
+  try {
+    const [rows] = await promisePool.query("SELECT * FROM properties");
+    return res.json(rows);
+  } catch (err) {
+    console.error("Error fetching properties:", err);
+    return res.status(500).json({ error: "Failed to fetch properties" });
+  }
 });
 
-/**
- * POST /api/property
- * Create a new property with child/floor details
- */
-router.post("/", upload.single("documents"), (req, res) => {
+
+router.post("/", upload.single("documents"), async (req, res) => {
   try {
-    // The JSON data from formData
     const { formData } = req.body;
     const parsedData = JSON.parse(formData);
 
@@ -68,58 +56,43 @@ router.post("/", upload.single("documents"), (req, res) => {
       INSERT INTO properties (propertyName, ownerName, address, documents)
       VALUES (?, ?, ?, ?)
     `;
-    db.query(
-      insertPropertyQuery,
-      [propertyName, ownerName, address, documentsPath],
-      (err, result) => {
-        if (err) {
-          console.error("Error inserting property:", err);
-          return res.status(500).json({ error: "Failed to save property" });
-        }
 
-        const newPropertyId = result.insertId;
+    const [result] = await promisePool.query(insertPropertyQuery, [
+      propertyName,
+      ownerName,
+      address,
+      documentsPath,
+    ]);
 
-        // If there are childProperties, insert each
-        if (Array.isArray(childProperties) && childProperties.length > 0) {
-          const insertChildQuery = `
-            INSERT INTO child_properties
-              (property_id, floor, title, description, rooms, washroom, gas, electricity, deposit, rent)
-            VALUES ?
-          `;
+    const newPropertyId = result.insertId;
 
-          // Build values array for bulk insert
-          const childValues = childProperties.map((child) => [
-            newPropertyId,
-            child.floor,
-            child.title,
-            child.description,
-            child.rooms,
-            child.washroom,
-            child.gas,
-            child.electricity,
-            child.deposit,
-            child.rent,
-          ]);
+    // If there are childProperties, insert each
+    if (Array.isArray(childProperties) && childProperties.length > 0) {
+      const insertChildQuery = `
+        INSERT INTO child_properties
+          (property_id, floor, title, description, rooms, washroom, gas, electricity, deposit, rent)
+        VALUES ?
+      `;
 
-          db.query(insertChildQuery, [childValues], (childErr) => {
-            if (childErr) {
-              console.error("Error inserting child properties:", childErr);
-              return res
-                .status(500)
-                .json({ error: "Failed to save child properties" });
-            }
+      const childValues = childProperties.map((child) => [
+        newPropertyId,
+        child.floor,
+        child.title,
+        child.description,
+        child.rooms,
+        child.washroom,
+        child.gas,
+        child.electricity,
+        child.deposit,
+        child.rent,
+      ]);
 
-            return res
-              .status(201)
-              .json({ message: "Property created with floors successfully" });
-          });
-        } else {
-          return res
-            .status(201)
-            .json({ message: "Property created (no floors)" });
-        }
-      }
-    );
+      await promisePool.query(insertChildQuery, [childValues]);
+
+      return res.status(201).json({ message: "Property created with floors successfully" });
+    } else {
+      return res.status(201).json({ message: "Property created (no floors)" });
+    }
   } catch (error) {
     console.error("Error saving property:", error);
     return res.status(500).json({ error: "Failed to save property" });
@@ -130,7 +103,7 @@ router.post("/", upload.single("documents"), (req, res) => {
  * GET /api/property/with-children/:id
  * Fetch a single property and all its child_properties in one go
  */
-router.get("/with-children/:id", (req, res) => {
+router.get("/with-children/:id", async (req, res) => {
   const { id } = req.params;
 
   const query = `
@@ -156,17 +129,13 @@ router.get("/with-children/:id", (req, res) => {
     WHERE p.id = ?
   `;
 
-  db.query(query, [id], (err, rows) => {
-    if (err) {
-      console.error("Error fetching property with children:", err);
-      return res.status(500).json({ error: "Database error" });
-    }
+  try {
+    const [rows] = await promisePool.query(query, [id]);
 
     if (!rows.length) {
       return res.status(404).json({ error: "Property not found" });
     }
 
-    // Build the property object from the first row
     const property = {
       id: rows[0].propertyId,
       propertyName: rows[0].propertyName,
@@ -176,7 +145,6 @@ router.get("/with-children/:id", (req, res) => {
       childProperties: [],
     };
 
-    // If there are child rows, push them into property.childProperties
     rows.forEach((row) => {
       if (row.childId) {
         property.childProperties.push({
@@ -195,7 +163,11 @@ router.get("/with-children/:id", (req, res) => {
     });
 
     return res.json(property);
-  });
+  } catch (err) {
+    console.error("Error fetching property with children:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
 });
+
 
 module.exports = router;
